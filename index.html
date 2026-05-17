@@ -1296,6 +1296,219 @@ function filt(category, clickedButton) {
   });
 }
 </script>
+
+<!-- COMMENT SECTION -->
+<style>
+  .comments-section{padding:1.5rem;border-top:1px solid var(--color-border-tertiary);margin-top:1rem;}
+  .comments-header{font-family:'Playfair Display',serif;font-size:22px;color:var(--color-text-primary);margin-bottom:.25rem;}
+  .comments-sub{font-size:12px;color:var(--color-text-tertiary);margin-bottom:1.25rem;}
+  .comment-box{background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:1.25rem;}
+  .comment-box textarea{width:100%;background:transparent;border:none;outline:none;padding:1rem;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--color-text-primary);resize:none;min-height:80px;line-height:1.6;}
+  .comment-box textarea::placeholder{color:var(--color-text-tertiary);}
+  .comment-box-footer{display:flex;justify-content:flex-end;padding:.6rem 1rem;border-top:.5px solid var(--color-border-tertiary);}
+  .submit-btn{background:#1a1208;color:#f5eed8;border:none;border-radius:20px;padding:6px 18px;font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer;transition:opacity .15s;}
+  .submit-btn:hover{opacity:.8;}
+  .submit-btn:disabled{opacity:.4;cursor:default;}
+  .comments-list{display:flex;flex-direction:column;gap:0;}
+  .comment{padding:1rem 0;border-top:.5px solid var(--color-border-tertiary);}
+  .comment:first-child{border-top:none;}
+  .comment-meta{font-size:11px;color:var(--color-text-tertiary);margin-bottom:.4rem;}
+  .comment-body{font-size:13px;color:var(--color-text-primary);line-height:1.65;margin-bottom:.6rem;}
+  .comment-actions{display:flex;align-items:center;gap:12px;}
+  .vote-group{display:flex;align-items:center;gap:4px;background:var(--color-background-secondary);border-radius:20px;padding:3px 8px;}
+  .vote-btn{background:none;border:none;cursor:pointer;font-size:13px;color:var(--color-text-tertiary);padding:0 2px;line-height:1;transition:color .1s;}
+  .vote-btn:hover{color:var(--color-text-primary);}
+  .vote-btn.up.active{color:#e8a020;}
+  .vote-btn.down.active{color:#6a7aaa;}
+  .vote-count{font-size:12px;font-weight:500;color:var(--color-text-secondary);min-width:16px;text-align:center;}
+  .reply-btn{background:none;border:none;cursor:pointer;font-size:11px;color:var(--color-text-tertiary);padding:0;font-family:'DM Sans',sans-serif;transition:color .1s;}
+  .reply-btn:hover{color:var(--color-text-primary);}
+  .replies{margin-left:1.25rem;padding-left:1rem;border-left:2px solid var(--color-border-tertiary);}
+  .reply-box{margin-top:.75rem;background:var(--color-background-secondary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;}
+  .reply-box textarea{width:100%;background:transparent;border:none;outline:none;padding:.75rem;font-family:'DM Sans',sans-serif;font-size:12px;color:var(--color-text-primary);resize:none;min-height:60px;line-height:1.6;}
+  .reply-box textarea::placeholder{color:var(--color-text-tertiary);}
+  .reply-box-footer{display:flex;justify-content:flex-end;gap:8px;padding:.5rem .75rem;border-top:.5px solid var(--color-border-tertiary);}
+  .cancel-btn{background:none;border:none;font-size:12px;color:var(--color-text-tertiary);cursor:pointer;font-family:'DM Sans',sans-serif;}
+  .empty-state{text-align:center;padding:2rem 1rem;color:var(--color-text-tertiary);font-size:13px;}
+</style>
+
+<div class="comments-section">
+  <div class="comments-header">Discussion</div>
+  <div class="comments-sub">What worked? Leave a thought.</div>
+
+  <div class="comment-box">
+    <textarea id="main-input" placeholder="Share a thought, a swap, a win..."></textarea>
+    <div class="comment-box-footer">
+      <button class="submit-btn" id="main-submit" onclick="submitComment()">Post</button>
+    </div>
+  </div>
+
+  <div class="comments-list" id="comments-list">
+    <div class="empty-state" id="empty-state">No comments yet. Be the first.</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const STORE_KEY = 'rfbook_comments_v1';
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+    catch { return []; }
+  }
+
+  function save(data) {
+    localStorage.setItem(STORE_KEY, JSON.stringify(data));
+  }
+
+  function timeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  }
+
+  function uid() {
+    return Math.random().toString(36).slice(2, 10);
+  }
+
+  function renderComment(c, depth) {
+    depth = depth || 0;
+    const el = document.createElement('div');
+    el.className = 'comment';
+    el.dataset.id = c.id;
+
+    const score = (c.up || 0) - (c.down || 0);
+    const upActive = c.myVote === 'up' ? ' active' : '';
+    const downActive = c.myVote === 'down' ? ' active' : '';
+
+    el.innerHTML = `
+      <div class="comment-meta">${timeAgo(c.ts)}</div>
+      <div class="comment-body">${escHtml(c.text)}</div>
+      <div class="comment-actions">
+        <div class="vote-group">
+          <button class="vote-btn up${upActive}" onclick="vote('${c.id}','up')">▲</button>
+          <span class="vote-count">${score}</span>
+          <button class="vote-btn down${downActive}" onclick="vote('${c.id}','down')">▼</button>
+        </div>
+        ${depth < 3 ? `<button class="reply-btn" onclick="toggleReply('${c.id}')">reply</button>` : ''}
+      </div>
+      <div class="reply-form-slot"></div>
+      <div class="replies"></div>
+    `;
+
+    if (c.replies && c.replies.length) {
+      const repliesEl = el.querySelector('.replies');
+      c.replies.forEach(r => repliesEl.appendChild(renderComment(r, depth + 1)));
+    }
+
+    return el;
+  }
+
+  function escHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  }
+
+  function renderAll() {
+    const data = load();
+    const list = document.getElementById('comments-list');
+    const empty = document.getElementById('empty-state');
+    list.innerHTML = '';
+    if (empty) list.appendChild(empty);
+
+    if (data.length === 0) {
+      if (empty) empty.style.display = '';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const sorted = [...data].sort((a,b) => ((b.up||0)-(b.down||0)) - ((a.up||0)-(a.down||0)));
+    sorted.forEach(c => list.appendChild(renderComment(c, 0)));
+  }
+
+  window.submitComment = function() {
+    const ta = document.getElementById('main-input');
+    const text = ta.value.trim();
+    if (!text) return;
+    const data = load();
+    data.push({ id: uid(), text, ts: Date.now(), up: 0, down: 0, myVote: null, replies: [] });
+    save(data);
+    ta.value = '';
+    renderAll();
+  };
+
+  window.vote = function(id, dir) {
+    const data = load();
+    function findAndVote(arr) {
+      for (let c of arr) {
+        if (c.id === id) {
+          if (c.myVote === dir) {
+            c[dir] = Math.max(0, (c[dir]||0) - 1);
+            c.myVote = null;
+          } else {
+            if (c.myVote) c[c.myVote] = Math.max(0, (c[c.myVote]||0) - 1);
+            c[dir] = (c[dir]||0) + 1;
+            c.myVote = dir;
+          }
+          return true;
+        }
+        if (c.replies && findAndVote(c.replies)) return true;
+      }
+    }
+    findAndVote(data);
+    save(data);
+    renderAll();
+  };
+
+  window.toggleReply = function(id) {
+    const el = document.querySelector(`.comment[data-id="${id}"]`);
+    if (!el) return;
+    const slot = el.querySelector('.reply-form-slot');
+    if (slot.querySelector('.reply-box')) {
+      slot.innerHTML = '';
+      return;
+    }
+    const replyId = uid();
+    slot.innerHTML = `
+      <div class="reply-box">
+        <textarea id="reply-input-${replyId}" placeholder="Write a reply..."></textarea>
+        <div class="reply-box-footer">
+          <button class="cancel-btn" onclick="toggleReply('${id}')">cancel</button>
+          <button class="submit-btn" onclick="submitReply('${id}', '${replyId}')">Reply</button>
+        </div>
+      </div>
+    `;
+    slot.querySelector('textarea').focus();
+  };
+
+  window.submitReply = function(parentId, replyId) {
+    const ta = document.getElementById('reply-input-' + replyId);
+    const text = ta.value.trim();
+    if (!text) return;
+    const data = load();
+    function findAndReply(arr) {
+      for (let c of arr) {
+        if (c.id === parentId) {
+          c.replies = c.replies || [];
+          c.replies.push({ id: uid(), text, ts: Date.now(), up: 0, down: 0, myVote: null, replies: [] });
+          return true;
+        }
+        if (c.replies && findAndReply(c.replies)) return true;
+      }
+    }
+    findAndReply(data);
+    save(data);
+    renderAll();
+  };
+
+  document.getElementById('main-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.ctrlKey) submitComment();
+  });
+
+  renderAll();
+})();
+</script>
 </div>
 </div>
 </body>
